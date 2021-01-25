@@ -50,7 +50,9 @@
       v-if="Object.keys(data).length"
       class="tools"
     >
-      <div>提示：单击单元格选中，单击顶部字母选中整列，单击左侧数字选中整行。右击单元格可修改内容。</div>
+      <div>
+        提示：单击单元格选中，单击顶部字母选中整列，单击左侧数字选中整行。右击单元格可修改内容。右击顶部字母可修改列宽。
+      </div>
       <div style="margin-top: 24px;">
         <a-space size="large">
           <div>
@@ -96,9 +98,9 @@
             <span>文字大小：</span>
             <a-input-number
               style="width: 120px;"
-              placeholder="12px ~ 48px"
+              placeholder="10px ~ 48px"
               v-model="style.fontSize"
-              :min="12"
+              :min="10"
               :max="48"
               :precision="0"
             />
@@ -152,16 +154,30 @@
           <a-button
             ghost
             type="primary"
-            @click="setOutBorder(true)"
+            @click="setOutBorder('outBorder', true)"
           >
             外边框
           </a-button>
           <a-button
             ghost
             type="primary"
-            @click="setOutBorder(false)"
+            @click="setOutBorder('outBorder', false)"
           >
             取消外边框
+          </a-button>
+          <a-button
+            ghost
+            type="primary"
+            @click="setOutBorder('bottomOutBorder', true)"
+          >
+            下边框
+          </a-button>
+          <a-button
+            ghost
+            type="primary"
+            @click="setOutBorder('bottomOutBorder', false)"
+          >
+            取消下边框
           </a-button>
           <a-button
             ghost
@@ -170,6 +186,12 @@
           >
             清除样式
           </a-button>
+        </a-space>
+        <br />
+        <a-space
+          size="large"
+          style="margin-top: 24px;"
+        >
           <a-button
             ghost
             type="primary"
@@ -218,7 +240,7 @@
         v-for="(item, key) in data"
         :key="key"
         :tab="key"
-        style="overflow: auto;"
+        style="max-height: 480px; margin-bottom: 128px; overflow: auto;"
       >
         <table class="table">
           <tr>
@@ -232,6 +254,7 @@
               :key="'header-' + colIndex"
               :class="{ td: true, 'td_index': true, 'td_selected': selectedCols.includes(colIndex) }"
               @click="selectedCol(colIndex)"
+                @contextmenu.prevent="editColWidth(colIndex)"
             >
               {{ fromNumberSystem26(colIndex + 1) }}
             </td>
@@ -247,16 +270,19 @@
             >
               {{ rowIndex + 1 }}
             </td>
-            <template
-              v-for="col of row"
-            >
+            <template v-for="(col, colIndex) of row">
               <td
                 v-if="col.cell_rowspan !== 0 && col.cell_colspan !== 0"
                 :class="{ td: true, 'td_selected': selectedKeys.includes(col.cell_id) }"
                 :key="col.cell_id"
                 :rowSpan="col.cell_rowspan"
                 :colSpan="col.cell_colspan"
-                :style="{ ...col.cell_style, borderColor: col.cell_style.outBorder ? '#000000' : '#EFEFEF' }"
+                :style="{
+                  ...col.cell_style,
+                  borderColor: col.cell_style.outBorder ? '#000000' : '#EFEFEF',
+                  minWidth: width[activeKey][colIndex],
+                  maxWidth: width[activeKey][colIndex]
+                }"
                 @click="selectRecord(col)"
                 @contextmenu.prevent="editColValue(col)"
               >
@@ -273,9 +299,21 @@
       ok-text="确认"
       cancel-text="取消"
       :mask-closable="false"
-      :visible="visible"
-      @cancel="visible = false"
-      @ok="handleEditOk"
+      :visible="visible.editContent"
+      @cancel="visible.editContent = false"
+      @ok="handleEditContentOk"
+    >
+      <a-input v-model="keyword" />
+    </a-modal>
+    <a-modal
+      centered
+      title="修改列宽"
+      ok-text="确认"
+      cancel-text="取消"
+      :mask-closable="false"
+      :visible="visible.editWidth"
+      @cancel="visible.editWidth = false"
+      @ok="handleEditWidthOk"
     >
       <a-input v-model="keyword" />
     </a-modal>
@@ -290,8 +328,12 @@ export default {
   name: 'App',
   data () {
     return {
-      visible: false,
+      visible: {
+        editContent: false,
+        editWidth: false
+      },
       keyword: undefined,
+      currentColIndex: 0,
       currentRecord: {},
       activeKey: undefined,
       success: undefined,
@@ -301,6 +343,7 @@ export default {
       selectedKeys: [],
       selectedCols: [],
       selectedRows: [],
+      width: {},
       defaultHeader: {
         cell_value: '',
         cell_rowspan: 1,
@@ -359,7 +402,15 @@ export default {
             const result = e.target.result
             const data = JSON.parse(result)
             // 删除表头站位数据
-            data.splice(0, 1)
+            const headers = data.splice(0, 1)[0]
+            // 设置列宽
+            this.width = { 'Sheet1': [] }
+            for (const item of headers) {
+              const cellStyle = item.cell_style || {}
+              this.width.Sheet1.push(cellStyle.width || '160px')
+            }
+            // 去掉第一个占位单元格
+            this.width.Sheet1.splice(0, 1)
             // 删除行头站位数据
             for (const row of data) {
               row.splice(0, 1)
@@ -423,26 +474,39 @@ export default {
         res.push({
           ...this.defaultHeader,
           cell_type: 'cell-col-header',
-          cell_id: uuidv4()
+          cell_id: uuidv4(),
+          cell_style: {
+            ...this.defaultHeader.cell_style,
+            width: this.width[this.activeKey][i]
+          }
         })
       }
       return res
     },
-    handleEditOk () {
+    handleEditWidthOk () {
+      this.width[this.activeKey][this.currentColIndex] = this.keyword
+      this.visible.editWidth = false
+    },
+    handleEditContentOk () {
       this.currentRecord.cell_value = this.keyword
-      this.visible = false
+      this.visible.editContent = false
+    },
+    editColWidth (colIndex) {
+      this.currentColIndex = colIndex
+      this.keyword = this.width[this.activeKey][this.currentColIndex]
+      this.visible.editWidth = true
     },
     editColValue (record) {
       this.currentRecord = record
       this.keyword = record.cell_value
-      this.visible = true
+      this.visible.editContent = true
     },
-    setOutBorder (outBorder) {
+    setOutBorder (key, outBorder) {
       this.traverseCol(col => {
         if (!this.selectedKeys.includes(col.cell_id)) return
         col.cell_style = {
           ...col.cell_style,
-          outBorder
+          [key]: outBorder
         }
       })
       this.$forceUpdate()
@@ -601,6 +665,8 @@ export default {
             for (const key in workbook.Sheets) {
               this.data[key] = this.handleExcelData(workbook.Sheets[key])
             }
+            // 设置默认列宽
+            this.width = this.handleColWidth(this.data)
             // 默认选中第一个sheet
             const keys = Object.keys(this.data)
             this.activeKey = keys[0]
@@ -617,6 +683,17 @@ export default {
       }).finally(() => {
         this.loading = false
       })
+    },
+    handleColWidth (data) {
+      const res = {}
+      for (const key in data) {
+        const columns = data[key][0]
+        res[key] = []
+        for (let i = 0; i < columns.length; i++) {
+          res[key].push('160px')
+        }
+      }
+      return res
     },
     handleExcelData (data) {
       let res = []
@@ -691,8 +768,8 @@ export default {
   border-spacing: 0;
 }
 .td {
-  min-width: 80px;
-  max-width: 160px;
+  /* min-width: 160px;
+  max-width: 160px; */
   padding: 4px 8px;
   overflow: hidden;
   white-space: nowrap;
