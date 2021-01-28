@@ -6,36 +6,71 @@
     <div class="header">
       <a-space
         size="large"
+        direction="vertical"
       >
-        <a-upload
-          accept=".xls,.xlsx,.json"
-          :show-upload-list="false"
-          :custom-request="() => false"
-          :file-list="fileList"
-          @change="handleFileChange"
-        >
-          <a-button>
-            选择文件
-          </a-button>
-        </a-upload>
-        <div
-          v-for="item of fileList"
-          :key="item.name"
-        >
-          {{ item.name }}
-        </div>
-        <span
-          v-if="success === true"
-          style="color: green;"
-        >
-          SUCCESS
-        </span>
-        <span
-          v-if="success === false"
-          style="color: red;"
-        >
-          FAILED
-        </span>
+        <a-space size="large">
+          <a-upload
+            accept=".xls,.xlsx,.json"
+            :show-upload-list="false"
+            :custom-request="() => false"
+            :file-list="fileList"
+            @change="handleFileChange"
+          >
+            <a-button>
+              选择文件
+            </a-button>
+          </a-upload>
+          <div
+            v-for="item of fileList"
+            :key="item.name"
+          >
+            {{ item.name }}
+          </div>
+          <span
+            v-if="success === true"
+            style="color: green;"
+          >
+            SUCCESS
+          </span>
+          <span
+            v-if="success === false"
+            style="color: red;"
+          >
+            FAILED
+          </span>
+        </a-space>
+        <a-space size="large">
+          <a-upload
+            v-if="fileList.length"
+            accept=".json"
+            :show-upload-list="false"
+            :custom-request="() => false"
+            :file-list="styleFileList"
+            @change="handleStyleFileChange"
+          >
+            <a-button>
+              引用样式
+            </a-button>
+          </a-upload>
+          <div
+            v-for="item of styleFileList"
+            :key="item.name"
+          >
+            {{ item.name }}
+          </div>
+          <span
+            v-if="styleSuccess === true"
+            style="color: green;"
+          >
+            SUCCESS
+          </span>
+          <span
+            v-if="styleSuccess === false"
+            style="color: red;"
+          >
+            FAILED
+          </span>
+        </a-space>
       </a-space>
       <a-button
         v-if="fileList.length"
@@ -228,6 +263,15 @@
           <a-button @click="selectInvert">
             反选
           </a-button>
+          <a-button
+            :disabled="selectedKeys.length !== 1"
+            @click="selectByColor"
+          >
+            选中相同背景颜色
+          </a-button>
+          <a-button @click="selectInputArea">
+            选中输入区
+          </a-button>
         </a-space>
       </div>
     </div>
@@ -240,7 +284,7 @@
         v-for="(item, key) in data"
         :key="key"
         :tab="key"
-        style="max-height: 480px; margin-bottom: 128px; overflow: auto;"
+        style="max-height: 480px; overflow: auto;"
       >
         <table class="table">
           <tr>
@@ -337,8 +381,11 @@ export default {
       currentRecord: {},
       activeKey: undefined,
       success: undefined,
+      styleSuccess: undefined,
       loading: false,
+      styleLoading: false,
       fileList: [],
+      styleFileList: [],
       data: {},
       selectedKeys: [],
       selectedCols: [],
@@ -392,6 +439,50 @@ export default {
   },
   methods: {
     fromNumberSystem26,
+    handleStyleJson () {
+      this.styleLoading = true
+      return new Promise((resolve, reject) => {
+        try {
+          const file = this.styleFileList[0]
+          const fileReader = new FileReader()
+          fileReader.onload = e => {
+            const result = e.target.result
+            const data = JSON.parse(result)
+            // 删除表头站位数据
+            data.splice(0, 1)[0]
+            // 删除行头站位数据
+            for (const row of data) {
+              row.splice(0, 1)
+            }
+            // 应用JSON样式
+            this.applyJsonStyle(data)
+          }
+          fileReader.readAsText(file.originFileObj)
+          resolve()
+        } catch (e) {
+          reject(e)
+        }
+      }).then(() => {
+        this.styleSuccess = true
+      }).catch(() => {
+        this.styleSuccess = false
+      }).finally(() => {
+        this.styleLoading = false
+      })
+    },
+    applyJsonStyle (data) {
+      for (const row of data) {
+        const rowIndex = data.indexOf(row)
+        for (const col of row) {
+          const colIndex = row.indexOf(col)
+          const currentSheet = this.data[this.activeKey]
+          if (currentSheet[rowIndex] && currentSheet[rowIndex][colIndex]) {
+            currentSheet[rowIndex][colIndex].cell_style = col.cell_style
+          }
+        }
+      }
+      this.$forceUpdate()
+    },
     handleJson () {
       this.loading = true
       return new Promise((resolve, reject) => {
@@ -535,6 +626,35 @@ export default {
       Object.assign(this.$data.formData, this.$options.data.bind(this)().formData)
       Object.assign(this.$data.style, this.$options.data.bind(this)().style)
     },
+    selectInputArea () {
+      this.selectedKeys = []
+      this.traverseCol(col => {
+        if (col.isInputArea) {
+          this.selectedKeys.push(col.cell_id)
+        }
+      })
+    },
+    selectByColor () {
+      const id = this.selectedKeys[0]
+      let currentCol
+      // 找到选中的单元格
+      this.traverseCol(col => {
+        if (col.cell_id === id) {
+          currentCol = col
+        }
+      })
+      // 选中所有相同颜色的单元格
+      if (currentCol) {
+        const color = (currentCol.cell_style || {}).backgroundColor
+        this.selectedKeys = []
+        this.traverseCol(col => {
+          const cellStyle = col.cell_style || {}
+          if (cellStyle.backgroundColor === color) {
+            this.selectedKeys.push(col.cell_id)
+          }
+        })
+      }
+    },
     selectedRow (rowIndex) {
       // 判断是选中还是取消
       let selected = true
@@ -638,6 +758,12 @@ export default {
         }
       }
     },
+    handleStyleFileChange ({ file }) {
+      this.styleFileList = [ file ]
+      // 初始化数据
+      this.styleSuccess = undefined
+      this.handleStyleJson()
+    },
     handleFileChange ({ file }) {
       this.fileList = [ file ]
       // 初始化数据
@@ -663,7 +789,9 @@ export default {
             const workbook = xlsx.read(data, { type: 'binary' })
             this.data = {}
             for (const key in workbook.Sheets) {
-              this.data[key] = this.handleExcelData(workbook.Sheets[key])
+              if (workbook.Sheets[key]['!ref']) {
+                this.data[key] = this.handleExcelData(workbook.Sheets[key])
+              }
             }
             // 设置默认列宽
             this.width = this.handleColWidth(this.data)
@@ -698,7 +826,7 @@ export default {
     handleExcelData (data) {
       let res = []
       const ref = data['!ref'].split(':')[1]
-      const endCol = toNumberSystem26(ref.match(/^[a-z|baiA-Z]+/gi)[0])
+      const endCol = toNumberSystem26(ref.match(/^[a-zA-Z]+/gi)[0])
       const endRow = Number(ref.match(/\d+$/gi))
       for (let rowIndex = 1; rowIndex <= endRow; rowIndex++) {
         let row = []
