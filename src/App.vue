@@ -203,14 +203,14 @@
           <a-button
             ghost
             type="primary"
-            @click="setOutBorder('bottomOutBorder', true)"
+            @click="setOutBorder('buttomOutBorder', true)"
           >
             下边框
           </a-button>
           <a-button
             ghost
             type="primary"
-            @click="setOutBorder('bottomOutBorder', false)"
+            @click="setOutBorder('buttomOutBorder', false)"
           >
             取消下边框
           </a-button>
